@@ -1,0 +1,23 @@
+# Keil C51 build artifacts
+*.obj
+*.lst
+*.m51
+*.map
+*.lnp
+*.build_log.htm
+*.iex
+build.log
+Templst.soclst
+
+# Keil user GUI and backup files
+*.uvgui.*
+*.uvopt.bak
+*.uvproj.bak
+*.bak
+
+# Temporary / empty files
+sch_p1.png
+
+# Keep only compiled HEX in Objects
+Objects/*
+!Objects/*.hex
