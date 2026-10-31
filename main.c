@@ -61,7 +61,7 @@ unsigned long r_hum;
 signed char temperature=25;
 unsigned char h_raw=0,h_filt=0,h_judge=0;
 unsigned char delay_min=30,trigger_rh=65;
-unsigned int w1,w2,last_w1=0,last_w2=0;
+unsigned int w1,w2,last_w1=0;
 unsigned char show_time_cnt=0;
 
 /* 动态湿度快速上升监测变量（规格书要求） */
@@ -123,12 +123,14 @@ void Display_Send_W1W2(unsigned char w1,unsigned char w2);
 
 void main(void)
 {
+
     GPIO_Init();
     ADC_Init();
     Timer0_Init();
     UART_Init();
     HS313_Timer2_Init();
 
+    EA=1;
     Fan(0);
     state=SENSE;
 
@@ -136,11 +138,8 @@ void main(void)
     w1=ADC_Read(ADC_W1);
     w2=ADC_Read(ADC_W2);
     last_w1=w1;
-    last_w2=w2;
     delay_min=Map_Time(w1);
     trigger_rh=Map_Hum(w2);
-
-    EA=1;
     Display_Send_W1W2(0, trigger_rh);
 
     while(1)
@@ -150,49 +149,17 @@ void main(void)
         /* 每100ms实时检测旋钮调节，扭动电位器时数码管立即同步刷新 */
         if(knob_tick)
         {
-            unsigned int diff_w1, diff_w2;
-            unsigned char new_delay, new_rh;
-            bit w1_changed = 0;
-
+            unsigned char new_rh;
             knob_tick=0;
 
             w1=ADC_Read(ADC_W1);
             w2=ADC_Read(ADC_W2);
+            delay_min=Map_Time(w1);
+            new_rh=Map_Hum(w2);
 
-            diff_w1 = (w1 > last_w1) ? (w1 - last_w1) : (last_w1 - w1);
-            diff_w2 = (w2 > last_w2) ? (w2 - last_w2) : (last_w2 - w2);
-
-            /* W2湿度旋钮：10 count迟滞防抖（约0.12%RH），消除临界点ADC底噪跳字 */
-            if(diff_w2 > 10)
-            {
-                last_w2 = w2;
-                new_rh = Map_Hum(w2);
-            }
-            else
-            {
-                new_rh = trigger_rh;
-            }
-
-            /* W1时间旋钮：平时需>36 count触发显示切换；已处于时间显示状态时>10 count即可精细微调 */
-            if(diff_w1 > 36)
+            if((w1 > last_w1 ? w1 - last_w1 : last_w1 - w1) > 40)
             {
                 last_w1 = w1;
-                delay_min = Map_Time(w1);
-                w1_changed = 1;
-            }
-            else if(show_time_cnt && diff_w1 > 10)
-            {
-                new_delay = Map_Time(w1);
-                if(new_delay != delay_min)
-                {
-                    last_w1 = w1;
-                    delay_min = new_delay;
-                    w1_changed = 1;
-                }
-            }
-
-            if(w1_changed)
-            {
                 trigger_rh = new_rh;
                 show_time_cnt = 3;
                 Display_Send_W1W2(delay_min, trigger_rh);
@@ -212,6 +179,12 @@ void main(void)
 
         sample5s=0;
 
+        /* 每采样周期同时更新电位器设定值 */
+        w1=ADC_Read(ADC_W1);
+        w2=ADC_Read(ADC_W2);
+        delay_min=Map_Time(w1);
+        trigger_rh=Map_Hum(w2);
+
         temperature=Read_NTC_Temp();
         adc_hum=HS313_Read_Peak();
         r_hum=Calc_HS_R(adc_hum);
@@ -228,16 +201,11 @@ void main(void)
         }
         else
         {
+            h_filt=(h_filt*50+h_raw*50)/100;
             if(h_raw>h_filt)
-            {
-                h_filt=(unsigned char)(((unsigned int)h_filt+h_raw+1U)>>1);
                 h_judge=h_raw;
-            }
             else
-            {
-                h_filt=(unsigned char)(((unsigned int)h_filt+h_raw)>>1);
                 h_judge=h_filt;
-            }
         }
 
         State_Machine();
@@ -259,6 +227,12 @@ void main(void)
            平时：左边实时显示实测湿度 h_judge (00~99)，右边显示设定阈值 trigger_rh (30~80)；
            调节时间旋钮W1时：左边显示延时分钟 delay_min (5~60) 约3秒，方便校准。
         */
+        if((w1 > last_w1 ? w1 - last_w1 : last_w1 - w1) > 40)
+        {
+            last_w1 = w1;
+            show_time_cnt = 3;
+        }
+
         if(show_time_cnt)
         {
             show_time_cnt--;
@@ -299,12 +273,6 @@ void GPIO_Init(void)
 
     P1CON&=~0x80;
     P1PH&=~0x80;
-
-    /* 未使用的外部引出脚(P0.0~P0.2, P1.0~P1.2)开启内部上拉，防止悬空引入交流电磁干扰 */
-    P0CON&=~0x07;
-    P0PH|=0x07;
-    P1CON&=~0x07;
-    P1PH|=0x07;
 
     ADCCFG0|=0x01;
     ADCCFG0|=0x10;
@@ -366,6 +334,8 @@ void timer0_isr(void) interrupt 1
 
     TH0=0x3C;
     TL0=0xB0;
+
+    WDTCON |= 0x10;
 
     if(++ck>=2)
     {
@@ -453,7 +423,6 @@ unsigned int HS313_Read_Peak(void)
 
         v=ADC_Read(ADC_HUM);
         sum+=v;
-        WDTCON |= 0x10;
     }
 
     return (unsigned int)(sum/16);
@@ -723,11 +692,10 @@ void Check_Rise_Trigger(void)
 {
     unsigned int cur_rise_sec;
 
-    /* 环境湿度若自然走低低于基准，无论处于哪个阶段均跟随下调并复位基准，
-       避免先小幅上升再开窗变干后，后续洗澡上升10%无法触发的问题 */
-    if(h_judge<rise_baseline)
+    /* 环境湿度若自然走低，跟随下调基准，避免慢速变干后轻微回弹误判 */
+    if(!rise_stage && h_judge<rise_baseline)
     {
-        Reset_Rise_Monitor(h_judge);
+        rise_baseline=h_judge;
         return;
     }
 
@@ -834,7 +802,6 @@ void State_Machine(void)
                 ET0=0;
                 fan_sec=0;
                 ET0=1;
-                Reset_Rise_Monitor(h_judge);
             }
         }
 
@@ -874,9 +841,8 @@ void UART_Init(void)
     SCON=0x50;
     PCON|=0x80;
 
-    T2CON&=~0x30;
+    T2CON=0x00;
 
-    TMOD&=~0xF0;
     TMOD|=0x20;
     TMCON|=0x02;
 
@@ -895,7 +861,6 @@ void UART_Byte(unsigned char c)
     SBUF=c;
 
     while(!tx_flag && --to);
-    WDTCON |= 0x10;
 }
 
 
