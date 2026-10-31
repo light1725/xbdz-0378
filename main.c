@@ -131,7 +131,6 @@ void main(void)
 
     Fan(0);
     state=SENSE;
-    EA=1;
 
     /* 开机立即读取电位器并计算初始设定值：W1控制延时时间，W2控制湿度阈值 */
     w1=ADC_Read(ADC_W1);
@@ -140,6 +139,8 @@ void main(void)
     last_w2=w2;
     delay_min=Map_Time(w1);
     trigger_rh=Map_Hum(w2);
+
+    EA=1;
     Display_Send_W1W2(0, trigger_rh);
 
     while(1)
@@ -227,11 +228,16 @@ void main(void)
         }
         else
         {
-            h_filt=(h_filt*50+h_raw*50)/100;
             if(h_raw>h_filt)
+            {
+                h_filt=(unsigned char)(((unsigned int)h_filt+h_raw+1U)>>1);
                 h_judge=h_raw;
+            }
             else
+            {
+                h_filt=(unsigned char)(((unsigned int)h_filt+h_raw)>>1);
                 h_judge=h_filt;
+            }
         }
 
         State_Machine();
@@ -294,11 +300,11 @@ void GPIO_Init(void)
     P1CON&=~0x80;
     P1PH&=~0x80;
 
-    /* 未使用的外部引出脚(P0.0~P0.2, P1.0~P1.1)开启内部上拉，防止悬空引入交流电磁干扰 */
+    /* 未使用的外部引出脚(P0.0~P0.2, P1.0~P1.2)开启内部上拉，防止悬空引入交流电磁干扰 */
     P0CON&=~0x07;
     P0PH|=0x07;
-    P1CON&=~0x03;
-    P1PH|=0x03;
+    P1CON&=~0x07;
+    P1PH|=0x07;
 
     ADCCFG0|=0x01;
     ADCCFG0|=0x10;
@@ -828,6 +834,7 @@ void State_Machine(void)
                 ET0=0;
                 fan_sec=0;
                 ET0=1;
+                Reset_Rise_Monitor(h_judge);
             }
         }
 
