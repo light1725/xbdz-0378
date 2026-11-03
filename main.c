@@ -3,7 +3,7 @@
 
 #define FAN_PIN P25
 #define ADC_NTC 0x00
-#define ADC_HUM 0x04
+#define ADC_HUM 0x01
 #define ADC_W2  0x08
 #define ADC_W1  0x09
 
@@ -258,12 +258,14 @@ void GPIO_Init(void)
     P0PH&=~0x08;
     P0&=~0x08;
 
-    P2CON|=0x02;
-    P2PH&=~0x02;
-    P2&=~0x02;
-
-    P2CON&=~0x10;
+    /* P2.4 (ADC_RH2+) 作为湿度交流激励接地驱动端，经 R6=33k 1% 对地分压 */
+    P2CON|=0x10;
     P2PH&=~0x10;
+    P2&=~0x10;
+
+    /* P2.1 (ADC_RH1+ / AIN1) 作为ADC采样输入口，经 R5=1k 1% 采样 CN3_Pin2 分压 */
+    P2CON&=~0x02;
+    P2PH&=~0x02;
 
     P2CON&=~0x01;
     P2PH&=~0x01;
@@ -275,7 +277,7 @@ void GPIO_Init(void)
     P1PH&=~0x80;
 
     ADCCFG0|=0x01;
-    ADCCFG0|=0x10;
+    ADCCFG0|=0x02;
     ADCCFG1|=0x03;
 }
 
@@ -387,12 +389,12 @@ void timer2_isr(void) interrupt 5
     if(P0&0x08)
     {
         P0&=~0x08;
-        P2|=0x02;
+        P2|=0x10;
     }
     else
     {
         P0|=0x08;
-        P2&=~0x02;
+        P2&=~0x10;
         hs_sample_tick=1;
     }
 }
@@ -433,8 +435,8 @@ unsigned int HS313_Read_Peak(void)
    HS-313 电阻计算 (单位: 10欧姆, 即 0.01kΩ, 与H3压缩表完全匹配)
 
    0378原理图电路与低湿校准:
-   P0.3(5V) -> R7(2.2k 1%) -> 传感器HS-313 -> CN3_Pin2 -> R5(33k 1%) -> P2.1(GND)
-   AIN4(P2.4) 经 R6(1k) 采样 CN3_Pin2 处分压。
+   P0.3(5V) -> R7(2.2k 1%) -> 传感器HS-313 -> CN3_Pin2 -> R6(33k 1%) -> P2.4(GND)
+   AIN1(P2.1) 经 R5(1k 1%) 采样 CN3_Pin2 处分压。
 
    低端误差修正说明:
    在45%~80%中高湿区，传感器阻抗(5.5k~160k)远小于交流容抗，纯阻性理论公式非常精准；
